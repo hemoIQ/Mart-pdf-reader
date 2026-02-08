@@ -1,0 +1,54 @@
+{
+  "name": "smart-pdf-reader",
+  "version": "0.1.0",
+  "description": "Smart PDF Reader - wrapped in Electron",
+  "main": "main.js",
+  "author": "hemoIQ",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/hemoIQ/Mart-pdf-reader.git"
+  },
+  "scripts": {
+    "start": "electron .",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder",
+    "publish": "electron-builder --publish always"
+  },
+  "dependencies": {
+    "electron-updater": "^6.7.3"
+  },
+  "devDependencies": {
+    "electron": "^26.0.0",
+    "electron-builder": "^24.0.0"
+  },
+  "build": {
+    "appId": "com.example.smartpdfreader",
+    "productName": "Smart PDF Reader",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "**/*",
+      "!node_modules/**/*",
+      "node_modules/electron-updater/**/*"
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "zip"
+      ],
+      "icon": "book.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "hemoIQ",
+      "repo": "Mart-pdf-reader"
+    }
+  }
+}
