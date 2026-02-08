@@ -1,582 +1,599 @@
-<!DOCTYPE html>
-<html lang="ar" dir="rtl">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Smart PDF Reader Pro - Master Luxury Glass</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
-    <style>
-        @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;600;700;900&display=swap');
-        
-        :root {
-            --glass-bg: rgba(15, 23, 42, 0.82);
-            --glass-border: rgba(255, 255, 255, 0.12);
-            --accent-blue: #3b82f6;
-            --smooth-ease: cubic-bezier(0.34, 1.56, 0.64, 1);
+import React, { useState, useEffect, useRef } from 'react';
+import { Plus, Trash2, ArrowLeft, Image as ImageIcon, Dumbbell, Calendar, LayoutGrid, HardDrive, Settings, AlertTriangle, Check, Palette, Search, Activity, List, Edit3, PlayCircle, Upload, Film, X } from 'lucide-react';
+
+// --- إعدادات قاعدة البيانات (IndexedDB) لحفظ الفيديوهات والصور الكبيرة ---
+const DB_NAME = 'GymTrackerDB';
+const DB_VERSION = 1;
+const STORE_NAME = 'media';
+
+const initDB = () => {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DB_NAME, DB_VERSION);
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => resolve(request.result);
+    request.onupgradeneeded = (event) => {
+      const db = event.target.result;
+      if (!db.objectStoreNames.contains(STORE_NAME)) {
+        db.createObjectStore(STORE_NAME, { keyPath: 'id' });
+      }
+    };
+  });
+};
+
+const saveMediaToDB = async (file) => {
+  const db = await initDB();
+  const id = `media_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  const item = { id, file, type: file.type, date: Date.now() };
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction([STORE_NAME], 'readwrite');
+    const store = transaction.objectStore(STORE_NAME);
+    const request = store.add(item);
+    request.onsuccess = () => resolve(id);
+    request.onerror = () => reject(request.error);
+  });
+};
+
+const getMediaFromDB = async (id) => {
+  const db = await initDB();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction([STORE_NAME], 'readonly');
+    const store = transaction.objectStore(STORE_NAME);
+    const request = store.get(id);
+    request.onsuccess = () => resolve(request.result ? request.result.file : null);
+    request.onerror = () => resolve(null);
+  });
+};
+
+const deleteMediaFromDB = async (id) => {
+  if (!id) return;
+  const db = await initDB();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction([STORE_NAME], 'readwrite');
+    const store = transaction.objectStore(STORE_NAME);
+    const request = store.delete(id);
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error);
+  });
+};
+
+// --- مكون عرض الوسائط (صورة أو فيديو) ---
+const MediaThumbnail = ({ mediaId, legacyImage, alt, className }) => {
+  const [src, setSrc] = useState(legacyImage || null);
+  const [type, setType] = useState(legacyImage ? 'image' : null);
+  const [loading, setLoading] = useState(!legacyImage);
+
+  useEffect(() => {
+    let objectUrl;
+    if (mediaId) {
+      setLoading(true);
+      getMediaFromDB(mediaId).then((file) => {
+        if (file) {
+          objectUrl = URL.createObjectURL(file);
+          setSrc(objectUrl);
+          setType(file.type.startsWith('video') ? 'video' : 'image');
         }
+        setLoading(false);
+      });
+    }
+    return () => {
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [mediaId]);
 
-        body {
-            font-family: 'Cairo', sans-serif;
-            background: radial-gradient(circle at 50% 0%, #111827, #020617);
-            color: #f1f5f9;
-            margin: 0; padding: 0;
-            overflow: hidden;
-            user-select: none;
-            height: 100vh;
-        }
+  if (loading) return <div className={`animate-pulse bg-zinc-800 ${className}`} />;
 
-        /* حاوية التمرير */
-        #scroll-root {
-            height: calc(100vh - 80px);
-            overflow-y: auto;
-            overflow-x: hidden;
-            scroll-behavior: auto !important; 
-        }
+  if (type === 'video') {
+    return (
+      <div className={`relative ${className} bg-black flex items-center justify-center`}>
+        <video src={src} className="w-full h-full object-cover" muted playsInline autoPlay loop />
+      </div>
+    );
+  }
 
-        header.glass-header {
-            background: var(--glass-bg);
-            backdrop-filter: blur(25px) saturate(200%);
-            border-bottom: 1px solid var(--glass-border);
-            height: 80px;
-            display: flex;
-            align-items: center;
-            padding: 0 2rem;
-            z-index: 2000;
-            box-shadow: 0 10px 50px rgba(0, 0, 0, 0.8);
-        }
+  if (src) {
+    return <img src={src} alt={alt} className={`${className} object-cover`} />;
+  }
 
-        #pages-container {
-            display: flex;
-            flex-direction: column;
-            gap: 60px;
-            align-items: center;
-            padding: 40px 0 400px 0;
-            width: 100%;
-            position: relative;
-        }
+  return (
+    <div className={`${className} flex flex-col items-center justify-center bg-zinc-800/50 opacity-50`}>
+       <Activity className="w-8 h-8 mb-2" />
+       <span className="text-[10px]">لا توجد وسائط</span>
+    </div>
+  );
+};
 
-        .page-holder {
-            position: relative;
-            background: rgba(255, 255, 255, 0.02);
-            border: 1px solid rgba(255, 255, 255, 0.05);
-            box-shadow: 0 60px 120px -30px rgba(0, 0, 0, 0.9);
-            transition: width 0.4s var(--smooth-ease);
-            width: 95%;
-            display: block;
-            flex-shrink: 0;
-            overflow: hidden;
-            border-radius: 15px;
-        }
+// --- التطبيق الرئيسي ---
 
-        .natural-view .page-holder { max-width: 820px; }
-        .flexible-view .page-holder { max-width: 98%; width: 98%; }
+const THEMES = {
+  classic: { id: 'classic', name: 'البرتقالي الكلاسيكي', bg: 'bg-[#09090b]', surface: 'bg-zinc-900', accent: 'text-orange-500', accentBg: 'bg-orange-600', accentHover: 'hover:bg-orange-500', accentLight: 'bg-orange-500/10', border: 'border-white/5', gradient: 'from-orange-400 to-orange-600' },
+  ocean: { id: 'ocean', name: 'أزرق المحيط', bg: 'bg-[#020617]', surface: 'bg-slate-900', accent: 'text-cyan-400', accentBg: 'bg-cyan-600', accentHover: 'hover:bg-cyan-500', accentLight: 'bg-cyan-500/10', border: 'border-cyan-500/10', gradient: 'from-cyan-400 to-blue-600' },
+  emerald: { id: 'emerald', name: 'الأخضر الزمردي', bg: 'bg-[#022c22]', surface: 'bg-[#064e3b]', accent: 'text-emerald-400', accentBg: 'bg-emerald-600', accentHover: 'hover:bg-emerald-500', accentLight: 'bg-emerald-500/10', border: 'border-emerald-500/10', gradient: 'from-emerald-400 to-green-600' },
+  royal: { id: 'royal', name: 'البنفسجي الملكي', bg: 'bg-[#0f0728]', surface: 'bg-[#1e1045]', accent: 'text-purple-400', accentBg: 'bg-purple-600', accentHover: 'hover:bg-purple-500', accentLight: 'bg-purple-500/10', border: 'border-purple-500/10', gradient: 'from-purple-400 to-indigo-600' },
+  lava: { id: 'lava', name: 'الحمم الحمراء', bg: 'bg-[#0c0000]', surface: 'bg-[#210000]', accent: 'text-red-500', accentBg: 'bg-red-600', accentHover: 'hover:bg-red-500', accentLight: 'bg-red-500/10', border: 'border-red-500/10', gradient: 'from-red-400 to-red-700' }
+};
 
-        .pdf-canvas { width: 100% !important; height: 100% !important; display: block; position: absolute; top: 0; left: 0; }
-        .draw-layer { position: absolute; top: 0; left: 0; width: 100% !important; height: 100% !important; z-index: 20; touch-action: none; mix-blend-mode: multiply; }
+const AppLogo = ({ theme }) => (
+  <div className="relative flex items-center justify-center w-10 h-10">
+    <div className={`absolute inset-0 ${theme.accentLight} blur-lg rounded-full animate-pulse`}></div>
+    <svg viewBox="0 0 24 24" className={`w-8 h-8 ${theme.accent} relative z-10`} fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M6 15h12M6 9h12M18 6v12M6 6v12M3 12h3M18 12h3" />
+    </svg>
+  </div>
+);
 
-        .inverted-mode .pdf-canvas { filter: invert(1) hue-rotate(180deg); }
-        .inverted-mode .draw-layer { mix-blend-mode: screen; }
+export default function App() {
+  const [days, setDays] = useState([]);
+  const [exercises, setExercises] = useState([]);
+  const [selectedDay, setSelectedDay] = useState(null);
+  const [isAddingDay, setIsAddingDay] = useState(false);
+  const [isAddingExercise, setIsAddingExercise] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [viewMedia, setViewMedia] = useState(null); 
+  const [currentTheme, setCurrentTheme] = useState(THEMES.classic);
+  const [deleteConfirm, setDeleteConfirm] = useState({ isOpen: false, type: null, id: null, title: '' });
+  
+  const [newDayTitle, setNewDayTitle] = useState('');
+  const [newExerciseName, setNewExerciseName] = useState('');
+  const [selectedFile, setSelectedFile] = useState(null); 
+  const [previewUrl, setPreviewUrl] = useState(null);
+  const [previewType, setPreviewType] = useState(null);
+  const [isSaving, setIsSaving] = useState(false);
 
-        .glass-btn {
-            background: rgba(255, 255, 255, 0.05);
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            transition: all 0.4s var(--smooth-ease);
-            cursor: pointer;
-            display: flex; align-items: center; justify-content: center;
-        }
-        .glass-btn:hover { background: rgba(255, 255, 255, 0.12); border-color: var(--accent-blue); transform: translateY(-4px); box-shadow: 0 15px 30px -5px rgba(59, 130, 246, 0.4); }
-        .glass-btn.active { background: var(--accent-blue); color: white; border-color: transparent; box-shadow: 0 0 30px rgba(59, 130, 246, 0.6); }
+  useEffect(() => {
+    const savedDays = localStorage.getItem('gym_days');
+    const savedExercises = localStorage.getItem('gym_exercises');
+    const savedTheme = localStorage.getItem('gym_theme');
+    
+    if (savedDays) try { setDays(JSON.parse(savedDays)); } catch (e) {}
+    if (savedExercises) try { setExercises(JSON.parse(savedExercises)); } catch (e) {}
+    if (savedTheme && THEMES[savedTheme]) setCurrentTheme(THEMES[savedTheme]);
+    
+    initDB().catch(console.error);
+  }, []);
 
-        /* القوائم المنسدلة */
-        #highlight-sub-tools, #scroll-sub-tools, #capture-sub-tools {
-            transition: all 0.6s var(--smooth-ease);
-            max-width: 0; overflow: hidden; opacity: 0; display: flex; align-items: center;
-        }
-        #highlight-sub-tools.visible, #scroll-sub-tools.visible, #capture-sub-tools.visible { 
-            max-width: 1000px; opacity: 1; margin-right: 1.5rem; 
-        }
+  useEffect(() => {
+    localStorage.setItem('gym_days', JSON.stringify(days));
+  }, [days]);
 
-        /* منطقة السحب والافلات الفائقة */
-        #drop-overlay {
-            display: none; position: fixed; inset: 0; z-index: 10000;
-            justify-content: center; align-items: center; backdrop-filter: blur(35px);
-            background: rgba(2, 6, 23, 0.92);
-            pointer-events: none;
-        }
-        #drop-overlay.active { display: flex; pointer-events: auto; }
-        .drop-box { border: 4px dashed rgba(59, 130, 246, 0.4); margin: 40px; border-radius: 60px; width: calc(100% - 80px); height: calc(100% - 80px); display: flex; flex-direction: column; align-items: center; justify-content: center; }
+  useEffect(() => {
+    localStorage.setItem('gym_exercises', JSON.stringify(exercises));
+  }, [exercises]);
 
-        #selection-rect {
-            position: fixed; border: 2.5px solid var(--accent-blue); background: rgba(59, 130, 246, 0.1);
-            display: none; z-index: 5000; pointer-events: none; box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.7); border-radius: 4px;
-        }
+  useEffect(() => {
+    if (!isAddingExercise) {
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+      setPreviewUrl(null);
+      setPreviewType(null);
+      setSelectedFile(null);
+      setNewExerciseName('');
+    }
+  }, [isAddingExercise]);
 
-        .loader-scr {
-            display: none; position: fixed; inset: 0; z-index: 9999;
-            justify-content: center; align-items: center; backdrop-filter: blur(30px);
-            background: rgba(2, 6, 23, 0.9);
-        }
+  const changeTheme = (themeKey) => {
+    setCurrentTheme(THEMES[themeKey]);
+    localStorage.setItem('gym_theme', themeKey);
+    setIsSettingsOpen(false);
+  };
 
-        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 10px; }
-        .progress-bar-container { background: rgba(255,255,255,0.05); border-radius: 20px; height: 6px; overflow: hidden; }
-        .progress-bar-fill { background: linear-gradient(90deg, #3b82f6, #60a5fa); transition: width 1.5s var(--smooth-ease); }
-        
-        .crop-active { cursor: crosshair !important; }
-        .brace-toggle-btn { font-size: 11px; font-weight: 900; padding: 4px 12px; border-radius: 8px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); transition: all 0.3s; color: #fff; }
-        .brace-toggle-btn.active { background: #3b82f6; border-color: transparent; box-shadow: 0 0 15px rgba(59, 130, 246, 0.4); }
-    </style>
-</head>
-<body class="natural-view text-white">
+  const handleAddDay = () => {
+    if (!newDayTitle.trim()) return;
+    const newDay = { id: Date.now().toString(), title: newDayTitle, createdAt: Date.now() };
+    setDays([...days, newDay]);
+    setNewDayTitle('');
+    setIsAddingDay(false);
+  };
 
-    <div id="selection-rect"></div>
+  const executeDelete = async () => {
+    if (deleteConfirm.type === 'day') {
+      const dayExercises = exercises.filter(ex => ex.dayId === deleteConfirm.id);
+      for (const ex of dayExercises) {
+        if (ex.mediaId) await deleteMediaFromDB(ex.mediaId);
+      }
+      setDays(prev => prev.filter(d => d.id !== deleteConfirm.id));
+      setExercises(prev => prev.filter(ex => ex.dayId !== deleteConfirm.id));
+      if (selectedDay?.id === deleteConfirm.id) setSelectedDay(null);
+    } else if (deleteConfirm.type === 'exercise') {
+      const exercise = exercises.find(ex => ex.id === deleteConfirm.id);
+      if (exercise?.mediaId) {
+        await deleteMediaFromDB(exercise.mediaId);
+      }
+      setExercises(prev => prev.filter(ex => ex.id !== deleteConfirm.id));
+    }
+    setDeleteConfirm({ isOpen: false, type: null, id: null, title: '' });
+  };
 
-    <!-- واجهة السحب والافلات المصلحة -->
-    <div id="drop-overlay">
-        <div class="drop-box">
-            <div class="p-16 rounded-[4rem] bg-blue-600/10 border border-blue-500/20 mb-8">
-                <svg class="w-32 h-32 text-blue-400 animate-bounce" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"></path></svg>
-            </div>
-            <h2 class="text-6xl font-black tracking-tighter">ألقِ كتابك هنا</h2>
-            <p class="text-slate-400 mt-4 text-2xl font-light text-center">سيتم استيراد المحتوى فوراً لمكتبتك الشخصية</p>
+  const handleAddExercise = async () => {
+    if (!newExerciseName.trim() || !selectedDay) return;
+    setIsSaving(true);
+
+    try {
+      let mediaId = null;
+      let mediaType = null;
+
+      if (selectedFile) {
+        mediaId = await saveMediaToDB(selectedFile);
+        mediaType = selectedFile.type.startsWith('video') ? 'video' : 'image';
+      }
+
+      const newEx = {
+        id: Date.now().toString(),
+        name: newExerciseName,
+        mediaId: mediaId, 
+        mediaType: mediaType,
+        dayId: selectedDay.id,
+        createdAt: Date.now()
+      };
+
+      setExercises(prev => [...prev, newEx]);
+      setIsAddingExercise(false);
+    } catch (error) {
+      console.error("Failed to save media:", error);
+      alert("حدث خطأ أثناء حفظ الملف. قد تكون المساحة ممتلئة.");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleFileSelect = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+      const url = URL.createObjectURL(file);
+      setPreviewUrl(url);
+      setPreviewType(file.type.startsWith('video') ? 'video' : 'image');
+      setSelectedFile(file);
+    }
+  };
+
+  const filteredExercises = exercises.filter(ex => ex.dayId === selectedDay?.id);
+
+  return (
+    <div className={`min-h-screen ${currentTheme.bg} text-zinc-100 font-sans pb-10 transition-colors duration-500`} dir="rtl">
+      {/* Header */}
+      <header className={`${currentTheme.surface}/50 backdrop-blur-xl border-b ${currentTheme.border} p-4 sticky top-0 z-40`}>
+        <div className="max-w-md mx-auto flex items-center justify-between">
+          {selectedDay ? (
+            <button onClick={() => setSelectedDay(null)} className="p-2 hover:bg-white/5 rounded-2xl transition-all active:scale-90">
+              <ArrowLeft className="w-6 h-6" />
+            </button>
+          ) : (
+            <AppLogo theme={currentTheme} />
+          )}
+          
+          <div className="flex flex-col items-center">
+            <h1 className={`text-lg font-black tracking-tight bg-gradient-to-l ${currentTheme.gradient} bg-clip-text text-transparent`}>
+              {selectedDay ? selectedDay.title : "نادي الأبطال"}
+            </h1>
+          </div>
+
+          <button onClick={() => setIsSettingsOpen(true)} className="p-2 text-zinc-500 hover:text-white transition-colors">
+            <Palette className="w-5 h-5" />
+          </button>
         </div>
-    </div>
+      </header>
 
-    <!-- شاشة التحميل -->
-    <div id="loading" class="loader-scr text-center">
-        <div class="w-24 h-24 border-4 border-blue-500/10 border-t-blue-500 rounded-full animate-spin mb-8 mx-auto"></div>
-        <p id="loading-text" class="text-xs font-black tracking-[0.5em] text-blue-400 uppercase">Engine Loading</p>
-    </div>
+      <main className="max-w-md mx-auto p-5">
+        {!selectedDay ? (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between mb-6">
+              <div>
+                <h2 className="text-white text-xl font-bold">جدولك الأسبوعي</h2>
+                <p className="text-zinc-500 text-xs mt-1">لديك {days.length} أيام مسجلة</p>
+              </div>
+              <button 
+                onClick={() => setIsAddingDay(true)}
+                className={`${currentTheme.accentBg} ${currentTheme.accentHover} text-white w-12 h-12 rounded-2xl flex items-center justify-center shadow-lg transition-all active:scale-90`}
+              >
+                <Plus className="w-6 h-6" />
+              </button>
+            </div>
 
-    <div id="toast" class="fixed bottom-12 left-1/2 -translate-x-1/2 bg-slate-900/90 backdrop-blur-2xl px-10 py-4 rounded-[2rem] shadow-2xl z-[10000] hidden border border-white/10 text-sm font-bold min-w-[250px] text-center"></div>
-
-    <div id="app" class="h-screen flex flex-col">
-        <header class="glass-header">
-            <div class="flex items-center gap-5">
-                <div class="bg-gradient-to-tr from-blue-600 to-blue-400 p-3 rounded-2xl shadow-2xl rotate-3">
-                    <svg class="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+            {days.length === 0 && !isAddingDay && (
+              <div className={`text-center py-24 ${currentTheme.surface}/30 rounded-[2.5rem] border ${currentTheme.border}`}>
+                <div className={`${currentTheme.surface}/50 rounded-full flex items-center justify-center mx-auto mb-6 w-20 h-20`}>
+                  <Dumbbell className={`w-10 h-10 text-zinc-600`} />
                 </div>
-                <div><h1 class="text-2xl font-black text-white leading-none tracking-tighter">قارئ برو</h1><p class="text-[10px] text-blue-400 font-bold tracking-[0.3em] uppercase mt-1">Master Edition</p></div>
+                <p className="text-zinc-400 font-medium text-lg">لا يوجد أيام حالياً</p>
+                <button onClick={() => setIsAddingDay(true)} className={`${currentTheme.accent} text-sm mt-2 font-bold hover:underline`}>اضغط لإضافة يوم جديد</button>
+              </div>
+            )}
+
+            <div className="grid gap-4">
+              {days.map((day) => (
+                <div 
+                  key={day.id}
+                  onClick={() => setSelectedDay(day)}
+                  className={`relative overflow-hidden ${currentTheme.surface} border ${currentTheme.border} p-6 rounded-[2rem] flex items-center justify-between group cursor-pointer active:scale-[0.98] transition-all shadow-2xl shadow-black`}
+                >
+                  <div className="flex items-center gap-5">
+                    <div className={`w-14 h-14 ${currentTheme.accentLight} rounded-[1.2rem] flex items-center justify-center ${currentTheme.accent} group-hover:${currentTheme.accentBg} group-hover:text-white transition-all duration-300`}>
+                      <Calendar className="w-7 h-7" />
+                    </div>
+                    <div>
+                      <h3 className="font-black text-xl text-white group-hover:translate-x-[-4px] transition-transform">{day.title}</h3>
+                      <p className="text-zinc-500 text-xs font-bold uppercase tracking-tighter">
+                        {exercises.filter(ex => ex.dayId === day.id).length} تمارين محفوظة
+                      </p>
+                    </div>
+                  </div>
+                  <button 
+                    onClick={(e) => { e.stopPropagation(); setDeleteConfirm({ isOpen: true, type: 'day', id: day.id, title: day.title }); }}
+                    className="relative z-10 p-3 text-zinc-700 hover:text-red-500 transition-colors active:scale-125"
+                  >
+                    <Trash2 className="w-5 h-5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <div className="animate-in fade-in slide-in-from-left duration-300">
+            <div className="flex items-center justify-between mb-8">
+              <div>
+                <h2 className="text-white text-xl font-black">التمارين</h2>
+                <p className="text-zinc-500 text-xs uppercase tracking-widest mt-1">تمارين {selectedDay.title}</p>
+              </div>
+              <button 
+                onClick={() => setIsAddingExercise(true)}
+                className="bg-white text-black px-5 py-2.5 rounded-xl flex items-center gap-2 text-sm font-black shadow-xl transition-all active:scale-95"
+              >
+                <Plus className="w-4 h-4" /> تمرين جديد
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 gap-5"> 
+              {/* تم إزالة زر الإضافة الكبير من هنا كما طلبت */}
+              
+              {filteredExercises.map((ex) => (
+                <div 
+                  key={ex.id} 
+                  className={`${currentTheme.surface} rounded-[1.8rem] overflow-hidden border ${currentTheme.border} relative group shadow-2xl cursor-pointer`}
+                  onClick={() => {
+                    if (ex.mediaType === 'video' || ex.mediaId || ex.image) {
+                        setViewMedia(ex);
+                    }
+                  }}
+                >
+                  <div className="aspect-video bg-zinc-800/20 flex items-center justify-center overflow-hidden relative">
+                    <MediaThumbnail mediaId={ex.mediaId} legacyImage={ex.image} alt={ex.name} className="w-full h-full" />
+                  </div>
+                  <div className={`p-4 ${currentTheme.surface}/80 backdrop-blur-sm border-t ${currentTheme.border}`}>
+                    <h4 className="font-bold text-sm text-white truncate">{ex.name}</h4>
+                  </div>
+                  <button 
+                    onClick={(e) => { e.stopPropagation(); setDeleteConfirm({ isOpen: true, type: 'exercise', id: ex.id, title: ex.name }); }}
+                    className="absolute top-3 left-3 p-2 bg-black/40 backdrop-blur-xl rounded-xl text-white opacity-0 group-hover:opacity-100 transition-all border border-white/10 active:scale-125 z-10"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              ))}
+
+              {filteredExercises.length === 0 && (
+                  <div className="py-20 text-center text-zinc-500 flex flex-col items-center">
+                      <div className="w-16 h-16 rounded-full bg-white/5 flex items-center justify-center mb-4">
+                        <Dumbbell className="w-8 h-8 opacity-50" />
+                      </div>
+                      <p className="text-sm">لا توجد تمارين مضافة بعد</p>
+                      <p className="text-xs opacity-50 mt-1">اضغط على "تمرين جديد" في الأعلى لإضافة تمرين</p>
+                  </div>
+              )}
+            </div>
+          </div>
+        )}
+      </main>
+
+      {/* Full Screen Media Modal */}
+      {viewMedia && (
+        <div className="fixed inset-0 bg-black/95 z-[70] flex flex-col justify-center items-center p-4 animate-in fade-in duration-200">
+           <button 
+            onClick={() => setViewMedia(null)} 
+            className="absolute top-6 left-6 p-3 bg-white/10 rounded-full text-white hover:bg-white/20 z-50"
+           >
+            <X className="w-6 h-6" />
+           </button>
+           
+           <h2 className="absolute top-8 text-xl font-bold text-white z-40 drop-shadow-md">{viewMedia.name}</h2>
+           
+           <div className="w-full max-w-4xl aspect-video rounded-3xl overflow-hidden shadow-2xl bg-black border border-white/10 relative">
+             {viewMedia.mediaType === 'video' ? (
+                 <MediaThumbnail mediaId={viewMedia.mediaId} legacyImage={viewMedia.image} className="w-full h-full" />
+             ) : (
+                <MediaThumbnail mediaId={viewMedia.mediaId} legacyImage={viewMedia.image} className="w-full h-full object-contain" />
+             )}
+             
+             {viewMedia.mediaType === 'video' && (
+                <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+                    <MediaThumbnail mediaId={viewMedia.mediaId} legacyImage={viewMedia.image} className="w-full h-full" />
+                </div>
+             )}
+              
+              <div className="absolute inset-0 bg-black">
+                 <MediaViewerFull mediaId={viewMedia.mediaId} legacyImage={viewMedia.image} />
+              </div>
+           </div>
+        </div>
+      )}
+
+      {/* Settings Modal */}
+      {isSettingsOpen && (
+        <div className="fixed inset-0 bg-black/95 backdrop-blur-xl z-[60] flex items-center justify-center p-6 animate-in fade-in duration-300">
+          <div className={`${currentTheme.surface} w-full max-w-sm rounded-[2.5rem] p-8 border ${currentTheme.border} shadow-2xl`}>
+            <div className="flex justify-between items-center mb-8">
+              <h2 className="text-2xl font-black text-white">اختر المظهر</h2>
+              <button onClick={() => setIsSettingsOpen(false)} className="text-zinc-500 hover:text-white">
+                <Plus className="w-6 h-6 rotate-45" />
+              </button>
             </div>
             
-            <div id="reader-controls" class="hidden flex-1 flex justify-center items-center gap-4">
-                
-                <!-- سكرول تلقائي -->
-                <div class="flex items-center bg-white/5 rounded-[1.5rem] p-1.5 border border-white/5 gap-1">
-                    <button id="auto-scroll-toggle-btn" onclick="toggleAutoScrollTools()" class="glass-btn p-3 rounded-2xl text-gray-300">
-                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 13l-7 7-7-7m14-8l-7 7-7-7"></path></svg>
-                    </button>
-                    <div id="scroll-sub-tools">
-                        <div class="flex flex-col items-center px-4 border-r border-white/10 text-white">
-                            <span id="speed-label" class="text-[9px] text-blue-400 font-black mb-1">5%</span>
-                            <input type="range" id="scroll-speed-range" min="1" max="100" value="5" oninput="updateScrollSpeed(this.value)" class="w-24 h-0.5 bg-white/10 accent-blue-500 appearance-none rounded-full cursor-pointer">
-                        </div>
-                        <button id="play-scroll-btn" onclick="runAutoScrollToggle()" class="p-3 text-gray-400 hover:text-green-400 transition-all hover:scale-125">
-                            <svg class="w-6 h-6" id="scroll-play-icon" fill="currentColor" viewBox="0 0 20 20"><path d="M4.5 3.5v13l11-6.5-11-6.5z"></path></svg>
-                        </button>
+            <div className="grid gap-4">
+              {Object.keys(THEMES).map((key) => {
+                const theme = THEMES[key];
+                const isActive = currentTheme.id === theme.id;
+                return (
+                  <button 
+                    key={key}
+                    onClick={() => changeTheme(key)}
+                    className={`flex items-center justify-between p-4 rounded-2xl border transition-all ${isActive ? `border-${theme.accent.split('-')[1]}-500 ${theme.accentLight}` : 'border-white/5 bg-white/5'}`}
+                  >
+                    <div className="flex items-center gap-4">
+                      <div className={`w-8 h-8 rounded-full ${theme.accentBg}`}></div>
+                      <span className={`font-bold ${isActive ? 'text-white' : 'text-zinc-400'}`}>{theme.name}</span>
                     </div>
-                </div>
-
-                <!-- تظليل (قلم) -->
-                <div class="flex items-center bg-white/5 rounded-[1.5rem] p-1.5 border border-white/5 gap-1">
-                    <button id="toggle-pen-btn" onclick="toggleHighlightTools()" class="glass-btn p-3 rounded-2xl text-gray-300">
-                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M15.232 5.232l3.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" stroke-width="2" stroke-linecap="round"></path></svg>
-                    </button>
-                    <div id="highlight-sub-tools">
-                        <div class="flex gap-2 px-4 border-r border-white/10">
-                            <button onclick="updateBrushColor('#ffff00', this)" class="w-5 h-5 rounded-full bg-yellow-400 hover:scale-150 transition-transform active"></button>
-                            <button onclick="updateBrushColor('#00ff00', this)" class="w-5 h-5 rounded-full bg-green-500 hover:scale-150 transition-transform"></button>
-                            <button onclick="updateBrushColor('#00ccff', this)" class="w-5 h-5 rounded-full bg-blue-400 hover:scale-150 transition-transform"></button>
-                        </div>
-                        <div class="flex bg-black/40 rounded-2xl p-1.5 gap-1 mx-4 border border-white/5">
-                            <button id="draw-free" onclick="setDrawMode('free')" class="tool-btn p-2 rounded-xl active"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M15.232 5.232l3.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" stroke-width="2"></path></svg></button>
-                            <button id="draw-rect" onclick="setDrawMode('rect')" class="tool-btn p-2 rounded-xl"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M10 4H7a2 2 0 00-2 2v12a2 2 0 002 2h3m4-16h3a2 2 0 012 2v12a2 2 0 01-2 2h-3" stroke-width="2.5"></path></svg></button>
-                            <button id="draw-eraser" onclick="setDrawMode('eraser')" class="tool-btn p-2 rounded-xl"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M19 11l-8-8-7 7 8 8 7-7zM12 19l7 7" stroke-width="2"></path></svg></button>
-                        </div>
-                        <div class="flex items-center gap-1.5 px-3 border-r border-white/10 bg-black/20 rounded-xl py-1">
-                            <button id="brace-left" onclick="setBraceSide('left')" class="brace-toggle-btn text-white">{</button>
-                            <button id="brace-both" onclick="setBraceSide('both')" class="brace-toggle-btn active text-white">{ }</button>
-                            <button id="brace-right" onclick="setBraceSide('right')" class="brace-toggle-btn text-white">}</button>
-                            <button id="brace-none" onclick="setBraceSide('none')" class="brace-toggle-btn text-white">X</button>
-                        </div>
-                        <input type="range" id="size-range" min="15" max="150" value="45" oninput="brushSize=this.value" class="w-24 h-0.5 bg-white/10 accent-blue-500 appearance-none rounded-full cursor-pointer mx-2">
-                        <button onclick="handleUndo()" class="p-3 text-gray-400 hover:text-blue-400 transition-all"><svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" stroke-width="2" stroke-linecap="round"></path></svg></button>
-                    </div>
-                </div>
-
-                <!-- التقاط الشاشة (الحركة الكلاسيكية السموذ) -->
-                <div class="flex items-center bg-white/5 rounded-[1.5rem] p-1.5 border border-white/5 gap-1">
-                    <button id="capture-toggle-btn" onclick="toggleCaptureTools()" class="glass-btn p-3 rounded-2xl text-gray-300">
-                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
-                    </button>
-                    <div id="capture-sub-tools">
-                        <div class="flex items-center gap-1.5 px-3 border-r border-white/10 text-white">
-                            <button onclick="captureFullPage()" class="px-4 py-2 text-[10px] font-black text-blue-300 hover:text-white transition-colors uppercase tracking-widest">Full Page</button>
-                            <button onclick="captureCurrentView()" class="px-4 py-2 text-[10px] font-black text-blue-300 hover:text-white transition-colors uppercase tracking-widest">Screen</button>
-                        </div>
-                        <button onclick="startCropMode()" class="px-4 py-2 text-[10px] font-black text-blue-300 hover:text-white transition-colors uppercase tracking-widest">Scroll Crop</button>
-                    </div>
-                </div>
-
-                <div class="bg-slate-900/80 px-6 py-3 rounded-2xl border border-white/5 text-xs font-black text-blue-400 shadow-inner flex items-center gap-4">
-                    <span id="page-now" class="text-white text-lg leading-none">1</span><span class="opacity-20 text-sm">/</span><span id="page-total" class="text-blue-300">1</span>
-                </div>
-
-                <button onclick="toggleFlex()" id="flex-btn" class="glass-btn px-8 py-3 rounded-2xl text-[11px] font-black uppercase text-blue-200">Natural View</button>
-                <button onclick="toggleInvert()" class="glass-btn p-3.5 rounded-2xl text-white"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" stroke-width="2"></path></svg></button>
-                <button onclick="closeReader()" class="bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 px-8 py-3 rounded-2xl font-black transition-all">خروج</button>
+                    {isActive && <Check className={`w-5 h-5 ${theme.accent}`} />}
+                  </button>
+                );
+              })}
             </div>
-
-            <div id="lib-controls">
-                <input type="file" id="file-in" class="hidden" accept=".pdf" onchange="handleFile(event)">
-                <label for="file-in" class="bg-blue-600 px-10 py-4 rounded-[1.5rem] font-black cursor-pointer hover:bg-blue-500 shadow-2xl transition-all inline-flex items-center gap-4 text-white active:scale-95">
-                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M12 4v16m8-8H4" stroke-width="3" stroke-linecap="round"></path></svg>
-                    <span>استيراد كتاب</span>
-                </label>
-            </div>
-        </header>
-
-        <main class="flex-1 overflow-hidden relative">
-            <div id="scroll-root" class="custom-scrollbar">
-                <div id="library-view" class="max-w-[1500px] mx-auto p-16 text-right">
-                    <div class="mb-24">
-                        <h2 class="text-8xl font-black mb-8 bg-gradient-to-b from-white to-slate-600 bg-clip-text text-transparent tracking-tighter">مكتبتي</h2>
-                        <p class="text-slate-400 text-3xl font-light max-w-3xl mr-0">تجربة قراءة PDF استثنائية مع نظام تصوير فائق الثبات.</p>
-                    </div>
-                    <div id="books-grid" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-16 text-center"></div>
-                    <div id="empty-state" class="hidden text-center py-40 text-slate-700 text-4xl font-thin italic">المكتبة فارغة حالياً.. اسحب ملف هنا.</div>
-                </div>
-                <div id="reader-view" class="hidden w-full"><div id="pages-container"></div></div>
-            </div>
-        </main>
-    </div>
-
-    <!-- نافذة الحذف المضمونة -->
-    <div id="confirm-modal" class="fixed inset-0 z-[10001] hidden items-center justify-center bg-black/70 backdrop-blur-3xl p-4 text-white text-center">
-        <div class="bg-slate-900/60 border border-white/10 p-16 rounded-[4rem] shadow-2xl max-w-lg w-full">
-            <h3 class="text-5xl font-black mb-6 tracking-tighter">حذف الكتاب؟</h3>
-            <p class="text-slate-400 mb-12 text-xl font-bold">سيتم مسح الكتاب وكافة التظليلات والتقدم نهائياً.</p>
-            <div class="flex gap-6">
-                <button id="confirm-yes" class="flex-[1.5] bg-red-600 py-6 rounded-[2rem] font-black text-white hover:bg-red-500 transition active:scale-95 text-lg">احذف</button>
-                <button id="confirm-no" class="flex-1 bg-white/5 py-6 rounded-[2rem] font-bold text-slate-300 border border-white/10 text-lg">تراجع</button>
-            </div>
+            <button onClick={() => setIsSettingsOpen(false)} className={`w-full mt-8 p-4 rounded-2xl bg-zinc-800 text-zinc-400 font-bold active:scale-95 transition-all`}>إغلاق</button>
+          </div>
         </div>
-    </div>
+      )}
 
-    <script>
-        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
+      {/* Confirmation Modal */}
+      {deleteConfirm.isOpen && (
+        <div className="fixed inset-0 bg-black/95 backdrop-blur-md z-[100] flex items-center justify-center p-6 animate-in fade-in duration-200">
+          <div className={`${currentTheme.surface} w-full max-w-xs rounded-[2.5rem] p-8 border border-red-500/20 shadow-2xl text-center`}>
+            <div className="w-16 h-16 bg-red-500/10 rounded-full flex items-center justify-center mb-6 mx-auto">
+              <AlertTriangle className="w-8 h-8 text-red-500" />
+            </div>
+            <h2 className="text-xl font-black mb-2 text-white">حذف نهائي؟</h2>
+            <p className="text-zinc-500 text-sm mb-8 leading-relaxed">سيتم حذف <span className="text-white font-bold">"{deleteConfirm.title}"</span> تماماً.</p>
+            <div className="flex flex-col gap-3">
+              <button onClick={executeDelete} className="w-full bg-red-600 text-white p-4 rounded-2xl font-black shadow-lg active:scale-95 transition-all">تأكيد الحذف</button>
+              <button onClick={() => setDeleteConfirm({ isOpen: false, type: null, id: null, title: '' })} className="w-full bg-zinc-800 text-zinc-400 p-4 rounded-2xl font-bold active:scale-95 transition-all">إلغاء</button>
+            </div>
+          </div>
+        </div>
+      )}
 
-        let db, pdfDoc, activeId, isFlexible = false, isNight = false, pageObs, globalPageRatio = 1.41;
-        let brushColor = '#ffff00', brushSize = 45, drawMode = 'free', pageStrokes = {};
-        let braceSide = 'both', isPainting = false, startPos = {x:0, y:0, scroll:0}, isHighlightEnabled = false, isCropMode = false, isCaptureToolsVisible = false;
-        let isAutoScrolling = false, isScrollToolsVisible = false, scrollSpeed = 5, scrollAnimId = null, subPixelAccumulator = 0;
+      {/* Add Day Modal */}
+      {isAddingDay && (
+        <div className="fixed inset-0 bg-black/90 backdrop-blur-xl z-50 flex items-center justify-center p-6 animate-in fade-in duration-300">
+          <div className={`${currentTheme.surface} w-full max-w-sm rounded-[2.5rem] p-8 border ${currentTheme.border} shadow-2xl`}>
+            <div className={`w-16 h-16 ${currentTheme.accentBg} rounded-[1.5rem] flex items-center justify-center mb-6 mx-auto shadow-lg`}>
+              <Calendar className="w-8 h-8 text-white" />
+            </div>
+            <h2 className="text-2xl font-black text-center mb-6">تسمية اليوم</h2>
+            <input 
+              autoFocus
+              type="text"
+              placeholder="مثلاً: يوم الصدر"
+              className={`w-full ${currentTheme.bg} border ${currentTheme.border} rounded-2xl p-5 text-white placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-${currentTheme.accent.split('-')[1]}-500 mb-6 text-center font-bold`}
+              value={newDayTitle}
+              onChange={(e) => setNewDayTitle(e.target.value)}
+              onKeyPress={(e) => e.key === 'Enter' && handleAddDay()}
+            />
+            <div className="flex gap-4">
+              <button onClick={handleAddDay} className={`flex-[2] ${currentTheme.accentBg} text-white p-5 rounded-2xl font-black shadow-lg active:scale-95 transition-all`}>تأكيد</button>
+              <button onClick={() => setIsAddingDay(false)} className="flex-1 bg-zinc-800 text-zinc-400 p-5 rounded-2xl font-bold active:scale-95 transition-all text-xs">إلغاء</button>
+            </div>
+          </div>
+        </div>
+      )}
 
-        const request = indexedDB.open("LuxuryReader_Final_v140_Stable", 1);
-        request.onupgradeneeded = e => { db = e.target.result; if (!db.objectStoreNames.contains("books")) db.createObjectStore("books", {keyPath: "id"}); };
-        request.onsuccess = e => { db = e.target.result; renderLib(); };
+      {/* Manual Add Exercise Modal with Video Support */}
+      {isAddingExercise && (
+        <div className="fixed inset-0 bg-black/90 backdrop-blur-xl z-50 flex items-center justify-center p-6 animate-in zoom-in duration-300">
+          <div className={`${currentTheme.surface} w-full max-w-sm rounded-[2.5rem] border ${currentTheme.border} shadow-2xl flex flex-col`}>
+            
+            <div className="p-6 pb-2 text-center border-b border-white/5">
+                <h2 className="text-xl font-black text-white">إضافة تمرين جديد</h2>
+                <p className="text-zinc-500 text-xs mt-1">أضف صورة أو فيديو توضيحي</p>
+            </div>
 
-        // نظام السحب والافلات المستقر (Z-index 10000)
-        const dropOverlay = document.getElementById('drop-overlay');
-        window.addEventListener('dragenter', e => { 
-            e.preventDefault(); e.stopPropagation(); 
-            if(document.getElementById('reader-view').classList.contains('hidden')) dropOverlay.classList.add('active');
-        });
-        dropOverlay.addEventListener('dragover', e => { e.preventDefault(); });
-        dropOverlay.addEventListener('dragleave', e => { if (e.target === dropOverlay || e.relatedTarget === null) dropOverlay.classList.remove('active'); });
-        window.addEventListener('drop', e => { e.preventDefault(); dropOverlay.classList.remove('active'); if(e.dataTransfer.files.length) handleIn(e.dataTransfer.files[0]); });
-
-        async function handleIn(file) {
-            if(!file || file.type !== 'application/pdf') return;
-            showLoading("PROCESSING DOCUMENT");
-            const reader = new FileReader();
-            reader.onload = async function() {
-                try {
-                    const originalBuffer = this.result;
-                    const tempPdf = await pdfjsLib.getDocument({ data: originalBuffer.slice(0) }).promise;
-                    const firstPage = await tempPdf.getPage(1);
-                    const vp = firstPage.getViewport({ scale: 0.5 });
-                    const canvas = document.createElement('canvas');
-                    canvas.width = vp.width; canvas.height = vp.height;
-                    await firstPage.render({ canvasContext: canvas.getContext('2d'), viewport: vp }).promise;
-                    const book = { id: 'bk_'+Date.now(), name: file.name, data: originalBuffer, last: 1, total: tempPdf.numPages, thumb: canvas.toDataURL('image/jpeg', 0.6), strokes: {} };
-                    const tx = db.transaction("books", "readwrite"); tx.objectStore("books").add(book);
-                    tx.oncomplete = () => { hideLoading(); renderLib(); showToast("تم استيراد الكتاب بنجاح"); };
-                } catch (err) { hideLoading(); alert("فشل في معالجة الملف."); }
-            };
-            reader.readAsArrayBuffer(file);
-        }
-
-        function handleFile(e) { if(e.target.files[0]) handleIn(e.target.files[0]); }
-
-        function renderLib() {
-            const tx = db.transaction("books", "readonly");
-            tx.objectStore("books").getAll().onsuccess = (e) => {
-                const books = e.target.result;
-                const grid = document.getElementById('books-grid'); grid.innerHTML = '';
-                document.getElementById('empty-state').style.display = books.length ? 'none' : 'block';
-                books.sort((a,b)=>b.id.localeCompare(a.id)).forEach(b => {
-                    const progress = Math.round((b.last / b.total) * 100);
-                    const el = document.createElement('div');
-                    el.className = "book-card-glass p-6 rounded-[2.5rem]";
-                    el.innerHTML = `
-                        <div class="relative group cursor-pointer overflow-hidden rounded-[2.5rem] mb-8 shadow-2xl shadow-black" onclick="openReader('${b.id}')">
-                            <img src="${b.thumb}" class="w-full aspect-[3/4] object-cover group-hover:scale-110 transition-all duration-1000">
-                            <div class="absolute inset-0 bg-gradient-to-t from-blue-900/90 to-transparent opacity-0 group-hover:opacity-100 flex items-end justify-center pb-12 transition-all">
-                                <span class="bg-white text-blue-600 px-10 py-4 rounded-2xl font-black shadow-2xl active:scale-90 transition-all">فتح الكتاب</span>
+            <div className="p-6">
+                <div className="mb-6">
+                    <label className={`flex flex-col items-center justify-center w-full aspect-video border-2 ${currentTheme.border} border-dashed rounded-[1.5rem] cursor-pointer hover:bg-white/5 transition-all relative overflow-hidden bg-zinc-900/50 group`}>
+                    {previewUrl ? (
+                        <>
+                            {previewType === 'video' ? (
+                                <video src={previewUrl} className="w-full h-full object-cover opacity-80" autoPlay muted loop playsInline />
+                            ) : (
+                                <img src={previewUrl} className="w-full h-full object-cover opacity-80" alt="Preview" />
+                            )}
+                            
+                            <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <span className="text-xs font-bold text-white">تغيير الملف</span>
                             </div>
+                            {previewType === 'video' && (
+                                <div className="absolute top-2 right-2 bg-black/50 p-1 rounded-md">
+                                    <Film className="w-4 h-4 text-white" />
+                                </div>
+                            )}
+                        </>
+                    ) : (
+                        <div className="text-center p-4">
+                            <div className="w-14 h-14 bg-zinc-800 rounded-full flex items-center justify-center mx-auto mb-3 shadow-inner">
+                                <Upload className={`w-6 h-6 ${currentTheme.accent}`} />
+                            </div>
+                            <p className="text-sm text-zinc-300 font-bold mb-1">صورة أو فيديو</p>
+                            <p className="text-[10px] text-zinc-500">اضغط لرفع ملف</p>
                         </div>
-                        <div class="text-right text-white">
-                            <h3 class="font-black text-2xl truncate mb-4" title="${b.name}">${b.name}</h3>
-                            <div class="flex justify-between text-[11px] text-blue-400 font-black mb-5 uppercase"><span>P. ${b.last}</span><span>${b.total - b.last} LEFT</span></div>
-                            <div class="progress-bar-container mb-6 shadow-inner"><div class="progress-bar-fill h-full" style="width: ${progress}%"></div></div>
-                            <div class="flex justify-between items-center">
-                                <span class="text-xs font-black text-slate-500 uppercase tracking-widest">${progress}% DONE</span>
-                                <button onclick="handleDelete(event, '${b.id}')" class="p-4 text-slate-500 hover:text-red-400 hover:bg-red-500/10 rounded-2xl transition-all active:scale-75"><svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7" stroke-width="2" stroke-linecap="round"></path></svg></button>
-                            </div>
-                        </div>`;
-                    grid.appendChild(el);
-                });
-            };
-        }
+                    )}
+                    <input type="file" className="hidden" accept="image/*,video/*" onChange={handleFileSelect} />
+                    </label>
+                </div>
 
-        async function openReader(id, startAt = null) {
-            const tx = db.transaction("books", "readonly");
-            tx.objectStore("books").get(id).onsuccess = async (e) => {
-                const b = e.target.result; activeId = id; pageStrokes = b.strokes || {};
-                showLoading("DEPLOYING PAGES");
-                pdfDoc = await pdfjsLib.getDocument({ data: b.data }).promise;
-                document.getElementById('page-total').innerText = pdfDoc.numPages;
-                const container = document.getElementById('pages-container'); container.innerHTML = '';
-                document.getElementById('library-view').classList.add('hidden');
-                document.getElementById('reader-view').classList.remove('hidden');
-                document.getElementById('reader-controls').classList.remove('hidden');
-                document.getElementById('lib-controls').classList.add('hidden');
-                const first = await pdfDoc.getPage(1);
-                globalPageRatio = first.getViewport({scale:1}).height / first.getViewport({scale:1}).width;
-                const targetW = isFlexible ? window.innerWidth * 0.98 : 820;
-                const fixedH = targetW * globalPageRatio;
-                for (let i = 1; i <= pdfDoc.numPages; i++) {
-                    const wrap = document.createElement('div');
-                    wrap.className = 'page-holder'; wrap.dataset.num = i; wrap.id = `pg-${i}`;
-                    wrap.style.height = fixedH + 'px'; container.appendChild(wrap);
-                }
-                initObserver();
-                const jumpTo = startAt || b.last;
-                setTimeout(() => { const el = document.getElementById(`pg-${jumpTo}`); if (el) el.scrollIntoView({ behavior: 'auto', block: 'start' }); hideLoading(); }, 350);
-            };
-        }
+                <div className="space-y-4">
+                    <input 
+                    type="text"
+                    placeholder="اسم التمرين (مثلاً: بنش برس)"
+                    className={`w-full ${currentTheme.bg} border ${currentTheme.border} rounded-2xl p-5 text-white placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-${currentTheme.accent.split('-')[1]}-500 font-bold text-center`}
+                    value={newExerciseName}
+                    onChange={(e) => setNewExerciseName(e.target.value)}
+                    />
+                    
+                    <button 
+                        onClick={handleAddExercise} 
+                        disabled={!newExerciseName.trim() || isSaving}
+                        className={`w-full ${currentTheme.accentBg} text-white p-5 rounded-2xl font-black shadow-lg active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2`}
+                    >
+                        {isSaving ? (
+                            <>
+                                <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                                <span>جاري الحفظ...</span>
+                            </>
+                        ) : "حفظ التمرين"}
+                    </button>
+                </div>
+            </div>
 
-        function initObserver() {
-            if(pageObs) pageObs.disconnect();
-            pageObs = new IntersectionObserver(entries => {
-                entries.forEach(entry => {
-                    const num = entry.target.dataset.num;
-                    if(entry.isIntersecting) { renderPageContent(num, entry.target); document.getElementById('page-now').innerText = num; updateProgressDB(parseInt(num)); } 
-                    else { entry.target.innerHTML = ''; }
-                });
-            }, { root: document.getElementById('scroll-root'), rootMargin: '1200px 0px', threshold: 0.01 });
-            document.querySelectorAll('.page-holder').forEach(p => pageObs.observe(p));
-        }
+            <div className="p-4 border-t border-white/5 bg-zinc-900/50 rounded-b-[2.5rem]">
+              <button onClick={() => setIsAddingExercise(false)} className="w-full py-3 bg-zinc-800 text-zinc-400 rounded-xl font-bold active:scale-95 transition-all text-xs">إلغاء</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
-        async function renderPageContent(num, container) {
-            if (container.children.length > 0) return;
-            const page = await pdfDoc.getPage(parseInt(num));
-            const targetW = isFlexible ? window.innerWidth * 0.98 : 820;
-            const vp = page.getViewport({ scale: (targetW / page.getViewport({scale:1}).width) * 1.8 }); 
-            const pCanvas = document.createElement('canvas'); pCanvas.className = 'pdf-canvas';
-            const dCanvas = document.createElement('canvas'); dCanvas.className = 'draw-layer';
-            pCanvas.width = vp.width; pCanvas.height = vp.height;
-            dCanvas.width = vp.width; dCanvas.height = vp.height;
-            container.appendChild(pCanvas); container.appendChild(dCanvas);
-            await page.render({ canvasContext: pCanvas.getContext('2d'), viewport: vp }).promise;
-            renderStoredStrokes(num, dCanvas); setupDrawingEngine(num, dCanvas);
-        }
+const MediaViewerFull = ({ mediaId, legacyImage }) => {
+    const [src, setSrc] = useState(legacyImage || null);
+    const [type, setType] = useState(legacyImage ? 'image' : null);
 
-        function drawBlackSharpBrace(ctx, x, y, h, side) {
-            ctx.save(); ctx.strokeStyle = '#000000'; ctx.lineWidth = 6;
-            const wing = 18; const mid = 18; ctx.beginPath();
-            if (side === 'start') {
-                ctx.moveTo(x + wing, y); ctx.lineTo(x, y); ctx.lineTo(x, y + h/2 - 10);
-                ctx.lineTo(x - mid, y + h/2); ctx.lineTo(x, y + h/2 + 10);
-                ctx.lineTo(x, y + h); ctx.lineTo(x + wing, y + h);
-            } else {
-                ctx.moveTo(x - wing, y); ctx.lineTo(x, y); ctx.lineTo(x, y + h/2 - 10);
-                ctx.lineTo(x + mid, y + h/2); ctx.lineTo(x, y + h/2 + 10);
-                ctx.lineTo(x, y + h); ctx.lineTo(x - wing, y + h);
-            }
-            ctx.stroke(); ctx.restore();
-        }
-
-        function setupDrawingEngine(num, canvas) {
-            const ctx = canvas.getContext('2d');
-            const getPos = e => {
-                const r = canvas.getBoundingClientRect();
-                const cx = (e.clientX || (e.touches ? e.touches[0].clientX : null));
-                const cy = (e.clientY || (e.touches ? e.touches[0].clientY : null));
-                if (cx === null) return null;
-                return { x: (cx - r.left) * (canvas.width / r.width), y: (cy - r.top) * (canvas.height / r.height) };
-            };
-            const down = e => {
-                if(isCropMode) { handleCropStart(e); return; }
-                if(!isHighlightEnabled) return;
-                isPainting = true; startPos = getPos(e);
-                if(!pageStrokes[num]) pageStrokes[num] = [];
-                if (drawMode === 'free' || drawMode === 'eraser') {
-                    pageStrokes[num].push({ mode: drawMode, color: brushColor, size: brushSize, paths:[[startPos.x/canvas.width, startPos.y/canvas.height]] });
-                } else if (drawMode === 'rect') {
-                    pageStrokes[num].push({ mode: 'rect', color: brushColor, x: startPos.x/canvas.width, y: startPos.y/canvas.height, w: 0, h: 0, brace: braceSide });
-                }
-                updateStrokeStyle(ctx, drawMode, canvas.width);
-            };
-            const move = e => {
-                if(isCropMode && isPainting) { handleCropMove(e); return; }
-                if(!isPainting || !isHighlightEnabled) return;
-                const p = getPos(e); if (!p) return;
-                if (drawMode === 'free' || drawMode === 'eraser') {
-                    ctx.beginPath(); ctx.moveTo(startPos.x, startPos.y); ctx.lineTo(p.x, p.y); ctx.stroke();
-                    pageStrokes[num][pageStrokes[num].length-1].paths.push([p.x/canvas.width, p.y/canvas.height]); startPos = p;
-                } else if (drawMode === 'rect') {
-                    renderStoredStrokes(num, canvas);
-                    const last = pageStrokes[num][pageStrokes[num].length-1];
-                    last.w = (p.x - startPos.x)/canvas.width; last.h = (p.y - startPos.y)/canvas.height;
-                    ctx.fillStyle = brushColor; ctx.globalAlpha = 0.35; ctx.fillRect(startPos.x, startPos.y, p.x - startPos.x, p.y - startPos.y); ctx.globalAlpha = 1.0;
-                    if (braceSide === 'both' || braceSide === 'left') drawBlackSharpBrace(ctx, startPos.x, startPos.y, p.y - startPos.y, 'start');
-                    if (braceSide === 'both' || braceSide === 'right') drawBlackSharpBrace(ctx, p.x, startPos.y, p.y - startPos.y, 'end');
-                }
-            };
-            const up = e => { if(isCropMode) handleCropEnd(); isPainting = false; saveToDB(); };
-            canvas.onmousedown = down; canvas.onmousemove = move; canvas.onmouseup = up;
-            canvas.ontouchstart = down; canvas.ontouchmove = move; canvas.ontouchend = up;
-        }
-
-        function renderStoredStrokes(num, canvas) {
-            if(!pageStrokes[num]) return;
-            const ctx = canvas.getContext('2d'); ctx.clearRect(0, 0, canvas.width, canvas.height);
-            pageStrokes[num].forEach(s => {
-                if(s.mode === 'rect') {
-                    ctx.fillStyle = s.color; ctx.globalAlpha = 0.35; ctx.fillRect(s.x*canvas.width, s.y*canvas.height, s.w*canvas.width, s.h*canvas.height); ctx.globalAlpha = 1.0;
-                    if (s.brace === 'both' || s.brace === 'left') drawBlackSharpBrace(ctx, s.x*canvas.width, s.y*canvas.height, s.h*canvas.height, 'start');
-                    if (s.brace === 'both' || s.brace === 'right') drawBlackSharpBrace(ctx, (s.x+s.w)*canvas.width, s.y*canvas.height, s.h*canvas.height, 'end');
-                } else {
-                    updateStrokeStyle(ctx, s.mode, canvas.width); if(s.mode !== 'eraser') ctx.strokeStyle = s.color;
-                    ctx.beginPath(); if(s.paths?.length) { ctx.moveTo(s.paths[0][0]*canvas.width, s.paths[0][1]*canvas.height); s.paths.forEach(p => ctx.lineTo(p[0]*canvas.width, p[1]*canvas.height)); ctx.stroke(); }
+    useEffect(() => {
+        let objectUrl;
+        if (mediaId) {
+            getMediaFromDB(mediaId).then((file) => {
+                if (file) {
+                    objectUrl = URL.createObjectURL(file);
+                    setSrc(objectUrl);
+                    setType(file.type.startsWith('video') ? 'video' : 'image');
                 }
             });
-            ctx.globalCompositeOperation = 'source-over';
         }
-
-        function setBraceSide(side) { braceSide = side; document.querySelectorAll('.brace-toggle-btn').forEach(btn => btn.classList.remove('active')); document.getElementById('brace-' + side).classList.add('active'); }
-        function updateStrokeStyle(ctx, mode, canvasWidth) { ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.lineWidth = (brushSize/1000)*canvasWidth; if (mode === 'eraser') { ctx.globalCompositeOperation = 'destination-out'; ctx.strokeStyle = 'rgba(0,0,0,1)'; } else { ctx.globalCompositeOperation = 'source-over'; ctx.strokeStyle = brushColor; } }
-        function toggleAutoScrollTools() { isScrollToolsVisible = !isScrollToolsVisible; document.getElementById('auto-scroll-toggle-btn').classList.toggle('active', isScrollToolsVisible); document.getElementById('scroll-sub-tools').classList.toggle('visible', isScrollToolsVisible); }
-        function runAutoScrollToggle() { isAutoScrolling = !isAutoScrolling; const btn = document.getElementById('play-scroll-btn'); const icon = document.getElementById('scroll-play-icon'); if(isAutoScrolling) { icon.innerHTML = `<path d="M5 4h3v12H5V4zm7 0h3v12h-3V4z"></path>`; btn.classList.add('text-green-400'); subPixelAccumulator = 0; runAutoScrollLoop(); } else { icon.innerHTML = `<path d="M4.5 3.5v13l11-6.5-11-6.5z"></path>`; btn.classList.remove('text-green-400'); cancelAnimationFrame(scrollAnimId); } }
-        function updateScrollSpeed(val) { scrollSpeed = parseInt(val); document.getElementById('speed-label').innerText = `${val}%`; }
-        function runAutoScrollLoop() { if(!isAutoScrolling) return; const root = document.getElementById('scroll-root'); let increment = (Math.pow(scrollSpeed, 2) / 1000) + (scrollSpeed / 120); subPixelAccumulator += increment; if (subPixelAccumulator >= 1) { let p = Math.floor(subPixelAccumulator); root.scrollTop += p; subPixelAccumulator -= p; } scrollAnimId = requestAnimationFrame(runAutoScrollLoop); }
-
-        function toggleCaptureTools() { isCaptureToolsVisible = !isCaptureToolsVisible; document.getElementById('capture-toggle-btn').classList.toggle('active', isCaptureToolsVisible); document.getElementById('capture-sub-tools').classList.toggle('visible', isCaptureToolsVisible); }
-        async function captureFullPage() {
-            const num = document.getElementById('page-now').innerText;
-            const holder = document.getElementById(`pg-${num}`);
-            if (!holder) return;
-            let pdfCanvas = holder.querySelector('.pdf-canvas'), drawCanvas = holder.querySelector('.draw-layer');
-            if (!pdfCanvas || !drawCanvas) { showLoading("REBUILDING PAGE..."); await renderPageContent(num, holder); pdfCanvas = holder.querySelector('.pdf-canvas'); drawCanvas = holder.querySelector('.draw-layer'); hideLoading(); }
-            const final = document.createElement('canvas'); final.width = pdfCanvas.width; final.height = pdfCanvas.height;
-            const fctx = final.getContext('2d');
-            if(isNight) fctx.filter = 'invert(1) hue-rotate(180deg)'; fctx.drawImage(pdfCanvas, 0, 0); fctx.filter = 'none';
-            fctx.globalCompositeOperation = isNight ? 'screen' : 'multiply'; fctx.drawImage(drawCanvas, 0, 0);
-            const link = document.createElement('a'); link.download = `page_${num}.png`; link.href = final.toDataURL(); link.click(); showToast("تم حفظ الورقة كاملة");
-        }
-        async function captureCurrentView() {
-            showLoading("SCREEN CAPTURE");
-            const viewCanvas = document.createElement('canvas'); viewCanvas.width = window.innerWidth * 2; viewCanvas.height = (window.innerHeight - 80) * 2;
-            const ctx = viewCanvas.getContext('2d');
-            const container = document.getElementById('pages-container');
-            document.querySelectorAll('.page-holder').forEach(holder => {
-                const hRect = holder.getBoundingClientRect();
-                if (hRect.bottom > 80 && hRect.top < window.innerHeight) {
-                    const pdfC = holder.querySelector('.pdf-canvas'), drawC = holder.querySelector('.draw-layer');
-                    if (pdfC && drawC) {
-                        const dY = (hRect.top - 80) * 2; const dX = hRect.left * 2;
-                        const temp = document.createElement('canvas'); temp.width = pdfC.width; temp.height = pdfC.height; const tctx = temp.getContext('2d');
-                        if(isNight) tctx.filter = 'invert(1) hue-rotate(180deg)'; tctx.drawImage(pdfC, 0, 0); tctx.filter = 'none';
-                        tctx.globalCompositeOperation = isNight ? 'screen' : 'multiply'; tctx.drawImage(drawC, 0, 0);
-                        ctx.drawImage(temp, dX, dY, hRect.width * 2, hRect.height * 2);
-                    }
-                }
-            });
-            const link = document.createElement('a'); link.download = 'screen.png'; link.href = viewCanvas.toDataURL(); link.click();
-            hideLoading(); showToast("تم التقاط الشاشة");
-        }
-        function startCropMode() { isCropMode = !isCropMode; if(isCropMode) { showToast("ابدأ القص واسحب لأسفل للتصوير الطويل"); document.body.classList.add('crop-active'); } else { document.body.classList.remove('crop-active'); } }
-        function handleCropStart(e) { const root = document.getElementById('scroll-root'); startPos = { x: e.clientX, y: e.clientY, scroll: root.scrollTop }; const rect = document.getElementById('selection-rect'); rect.style.display = 'block'; rect.style.width = '0px'; rect.style.height = '0px'; isPainting = true; }
-        function handleCropMove(e) {
-            const rect = document.getElementById('selection-rect'); const root = document.getElementById('scroll-root');
-            if(e.clientY > window.innerHeight - 60) root.scrollTop += 25; if(e.clientY < 140) root.scrollTop -= 25;
-            const currentScrollDiff = root.scrollTop - startPos.scroll;
-            const width = e.clientX - startPos.x; const height = (e.clientY - startPos.y) + currentScrollDiff;
-            rect.style.left = (width > 0 ? startPos.x : e.clientX) + 'px'; rect.style.top = (height > 0 ? startPos.y : e.clientY) + 'px';
-            rect.style.width = Math.abs(width) + 'px'; rect.style.height = Math.abs(height) + 'px';
-        }
-        async function handleCropEnd() {
-            const rect = document.getElementById('selection-rect').getBoundingClientRect();
-            if(rect.width < 10 || rect.height < 10) { document.getElementById('selection-rect').style.display = 'none'; isPainting = false; return; }
-            showLoading("DYNAMICS CAPTURE");
-            const resultCanvas = document.createElement('canvas'); const container = document.getElementById('pages-container'); const containerRect = container.getBoundingClientRect();
-            const absTop = rect.top - containerRect.top; const absLeft = rect.left - containerRect.left; const scale = 2.0;
-            resultCanvas.width = rect.width * scale; resultCanvas.height = rect.height * scale; const ctx = resultCanvas.getContext('2d');
-            for (let holder of document.querySelectorAll('.page-holder')) {
-                const hRect = holder.getBoundingClientRect(); const hTop = hRect.top - containerRect.top; const hBottom = hTop + hRect.height;
-                if (hBottom > absTop && hTop < (absTop + rect.height)) {
-                    let pdfC = holder.querySelector('.pdf-canvas'), drawC = holder.querySelector('.draw-layer');
-                    if (!pdfC || !drawC) { await renderPageContent(holder.dataset.num, holder); pdfC = holder.querySelector('.pdf-canvas'); drawC = holder.querySelector('.draw-layer'); }
-                    if (pdfC && drawC) {
-                        const sY = Math.max(0, absTop - hTop) * (pdfC.height / hRect.height);
-                        const dY = Math.max(0, hTop - absTop) * scale;
-                        const drawH = Math.min(hRect.height - Math.max(0, absTop - hTop), rect.height - Math.max(0, hTop - absTop)) * scale;
-                        const sX = (absLeft - (hRect.left - containerRect.left)) * (pdfC.width / hRect.width);
-                        const sW = rect.width * (pdfC.width / hRect.width);
-                        const temp = document.createElement('canvas'); temp.width = sW; temp.height = drawH / scale * (pdfC.height / hRect.height); const tctx = temp.getContext('2d');
-                        if(isNight) tctx.filter = 'invert(1) hue-rotate(180deg)'; tctx.drawImage(pdfC, sX, sY, sW, temp.height, 0, 0, sW, temp.height); tctx.filter = 'none';
-                        tctx.globalCompositeOperation = isNight ? 'screen' : 'multiply'; tctx.drawImage(drawC, sX, sY, sW, temp.height, 0, 0, sW, temp.height);
-                        ctx.drawImage(temp, 0, dY, resultCanvas.width, drawH);
-                    }
-                }
-            }
-            const link = document.createElement('a'); link.download = 'long_capture.png'; link.href = resultCanvas.toDataURL(); link.click();
-            document.getElementById('selection-rect').style.display = 'none'; isPainting = false; isCropMode = false; hideLoading();
-            document.body.classList.remove('crop-active'); showToast("تم حفظ الصورة بنجاح");
-        }
-
-        function toggleHighlightTools() { isHighlightEnabled = !isHighlightEnabled; document.getElementById('toggle-pen-btn').classList.toggle('active', isHighlightEnabled); document.getElementById('highlight-sub-tools').classList.toggle('visible', isHighlightEnabled); }
-        function handleUndo() { const n = document.getElementById('page-now').innerText; if(pageStrokes[n]?.length > 0) { pageStrokes[n].pop(); const c = document.querySelector(`#pg-${n} .draw-layer`); if(c) renderStoredStrokes(n, c); saveToDB(); } }
-        function toggleFlex() { const cur = document.getElementById('page-now').innerText; isFlexible = !isFlexible; document.body.className = isFlexible ? "flexible-view" : "natural-view"; document.getElementById('flex-btn').innerText = isFlexible ? "View: Flexible" : "View: Natural"; if(activeId) openReader(activeId, cur); }
-        function closeReader() { isAutoScrolling = false; cancelAnimationFrame(scrollAnimId); document.getElementById('reader-view').classList.add('hidden'); document.getElementById('reader-controls').classList.add('hidden'); document.getElementById('library-view').classList.remove('hidden'); document.getElementById('lib-controls').classList.remove('hidden'); renderLib(); }
-        function saveToDB() { const tx = db.transaction("books", "readwrite"); tx.objectStore("books").get(activeId).onsuccess = e => { let b = e.target.result; if(b){ b.strokes = pageStrokes; tx.objectStore("books").put(b); } }; }
-        function updateProgressDB(p) { const tx = db.transaction("books", "readwrite"); tx.objectStore("books").get(activeId).onsuccess = e => { let b = e.target.result; if(b){ b.last = p; tx.objectStore("books").put(b); } }; }
-        function toggleInvert() { isNight = !isNight; document.body.classList.toggle('inverted-mode', isNight); }
-        function updateBrushColor(c, btn) { brushColor = c; document.querySelectorAll('.color-btn').forEach(x=>x.classList.remove('active')); btn.classList.add('active'); if(drawMode==='eraser') setDrawMode('free'); }
-        function setDrawMode(m) { drawMode = m; document.querySelectorAll('.tool-btn').forEach(x=>x.classList.remove('active')); document.getElementById('draw-'+m).classList.add('active'); }
-        function showLoading(t) { document.getElementById('loading').style.display = 'flex'; const textEl = document.getElementById('loading-text'); if(textEl) textEl.innerText = t; }
-        function hideLoading() { document.getElementById('loading').style.display = 'none'; }
-        function showToast(m) { const t = document.getElementById('toast'); t.innerText = m; t.classList.remove('hidden'); setTimeout(() => t.classList.add('hidden'), 2000); }
-
-        window.onload = () => {
-            const btnNo = document.getElementById('confirm-no');
-            const btnYes = document.getElementById('confirm-yes');
-            if(btnNo) btnNo.onclick = () => document.getElementById('confirm-modal').style.display = 'none';
-            if(btnYes) btnYes.onclick = () => {
-                const tx = db.transaction("books", "readwrite");
-                tx.objectStore("books").delete(deleteTargetId).onsuccess = () => {
-                    document.getElementById('confirm-modal').style.display = 'none';
-                    renderLib();
-                    showToast("تم الحذف بنجاح");
-                };
-            };
+        return () => {
+            if (objectUrl) URL.revokeObjectURL(objectUrl);
         };
+    }, [mediaId]);
 
-        let deleteTargetId = null;
-        function handleDelete(e, id) { e.stopPropagation(); deleteTargetId = id; document.getElementById('confirm-modal').style.display = 'flex'; }
-    </script>
-</body>
-</html>
+    if (!src) return <div className="text-white">جاري التحميل...</div>;
+
+    if (type === 'video') {
+        // تم تفعيل التكرار (loop) هنا أيضاً للفيديو عند عرضه بملء الشاشة
+        return <video src={src} controls autoPlay loop className="w-full h-full object-contain" />;
+    }
+    return <img src={src} className="w-full h-full object-contain" alt="Full view" />;
+};
