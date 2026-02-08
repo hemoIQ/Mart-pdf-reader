@@ -37,16 +37,13 @@
         "nsis",
         "zip"
       ],
-      "icon": "app-icon.png",
       "executableName": "Smart PDF Reader"
     },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
-      "createStartMenuShortcut": true,
-      "installerIcon": "app-icon.png",
-      "uninstallerIcon": "app-icon.png"
+      "createStartMenuShortcut": true
     },
     "publish": {
       "provider": "github",
