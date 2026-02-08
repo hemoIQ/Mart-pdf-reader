@@ -37,7 +37,7 @@
         "nsis",
         "zip"
       ],
-      "icon": "book.ico"
+      "icon": "app-icon.png"
     },
     "nsis": {
       "oneClick": false,
